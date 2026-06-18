@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+# Keep template notebooks (01_ and 02_)
+# *.ipynb is NOT excluded - the notebooks are part of the project
+
+# 虚拟环境
+venv/
+env/
+ev_project/
+
+# 数据文件 (CSV过大，不提交)
+data/*.csv
+data/*.json
+!data/.gitkeep
+
+# 模型文件 (过大，不提交)
+*.pkl
+*.joblib
+*.h5
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Selenium
+*.log
+geckodriver.log
+chromedriver.log
