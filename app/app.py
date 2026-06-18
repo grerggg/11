@@ -1240,33 +1240,28 @@ def render_regional_analysis(df: pd.DataFrame):
         fig.update_layout(height=500, margin=dict(l=0, r=0, t=10, b=0))
         st.plotly_chart(fig, use_container_width=True)
     else:
-        fig = px.choropleth(
-            regional_df,
+        # 使用 go.Choropleth（兼容 Plotly 5 & 6）
+        colorscale = "RdYlGn" if map_metric != "winter_avg_temp" else "RdBu_r"
+        fig = go.Figure(go.Choropleth(
             geojson=china_geojson,
-            locations="province",
+            locations=regional_df["province"],
+            z=regional_df[map_metric],
             featureidkey="properties.name",
-            color=map_metric,
-            hover_name="province",
-            hover_data={
-                "ev_annual_sales_10k": ":.1f",
-                "charger_count_per_10k": ":.1f",
-                "urban_income": ":.1f",
-                "winter_avg_temp": ":.1f",
-            },
-            color_continuous_scale="RdYlGn" if map_metric != "winter_avg_temp" else "RdBu_r",
-            labels=metric_label_map,
-        )
+            colorscale=colorscale,
+            colorbar_title=metric_label_map.get(map_metric, map_metric),
+            marker_line_width=0.5,
+            marker_line_color="#ffffff",
+            hovertemplate="%{location}<br>"
+                           + metric_label_map.get(map_metric, map_metric)
+                           + ": %{z:.1f}<extra></extra>",
+        ))
         fig.update_geos(
             visible=False,
             projection_type="equirectangular",
             center={"lat": 35, "lon": 105},
             projection_scale=5,
-            showcountries=False,
-            showcoastlines=False,
-            showland=False,
-            showocean=False,
-            showlakes=False,
-            showrivers=False,
+            showcountries=False, showcoastlines=False,
+            showland=False, showocean=False,
         )
         fig.update_layout(
             height=550,
