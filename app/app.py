@@ -121,13 +121,26 @@ def _resolve_data_path(filename: str) -> Path | None:
 # 中国地图 GeoJSON 加载（模块级缓存）
 # =============================================================================
 
-@st.cache_data(ttl=3600)  # 1小时缓存，避免旧缓存干扰
+@st.cache_data
 def _load_china_geojson():
-    """加载中国省份边界 GeoJSON（阿里云 DataV），带多重备用方案"""
+    """加载中国省份边界 GeoJSON，优先本地文件，次选网络"""
     import json
-    url = "https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json"
 
-    # 方案 1: urllib
+    # 方案 1: 本地文件（最快、最可靠）
+    local_paths = [
+        Path(__file__).parent / "china_provinces.json",
+        PROJECT_ROOT / "app" / "china_provinces.json",
+    ]
+    for lp in local_paths:
+        try:
+            if lp.exists():
+                with open(lp, "r", encoding="utf-8") as f:
+                    return json.load(f)
+        except Exception:
+            pass
+
+    # 方案 2: 网络（阿里云 DataV）
+    url = "https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json"
     try:
         import urllib.request
         with urllib.request.urlopen(url, timeout=10) as resp:
@@ -135,7 +148,6 @@ def _load_china_geojson():
     except Exception:
         pass
 
-    # 方案 2: requests（更可靠的 SSL 处理）
     try:
         import requests
         r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
