@@ -1250,13 +1250,21 @@ def render_regional_analysis(df: pd.DataFrame):
     }
     regional_df["adcode"] = regional_df["province"].map(PROVINCE_ADCODE)
 
-    # 给 GeoJSON 每个 feature 添加 id 字段（Plotly 默认匹配 feature.id）
+    # 从 GeoJSON 提取各省中心坐标
+    province_centers = {}
     if china_geojson:
         for feat in china_geojson["features"]:
-            feat["id"] = str(feat["properties"]["adcode"])
+            name = feat["properties"]["name"]
+            center = feat["properties"].get("center", None)
+            if name and center and len(center) == 2:
+                province_centers[name] = (center[0], center[1])  # (lon, lat)
 
-    if china_geojson is None:
-        st.warning("⚠️ 无法加载中国地图数据，改用柱状图展示")
+    regional_df["lon"] = regional_df["province"].map(lambda p: province_centers.get(p, (None, None))[0])
+    regional_df["lat"] = regional_df["province"].map(lambda p: province_centers.get(p, (None, None))[1])
+    map_ready = regional_df["lon"].notna().all()
+
+    if not map_ready:
+        st.warning("⚠️ 地图坐标数据缺失，改用柱状图")
         fig = px.bar(
             regional_df.nlargest(15, map_metric),
             x="province", y=map_metric,
@@ -1267,39 +1275,40 @@ def render_regional_analysis(df: pd.DataFrame):
         fig.update_layout(height=500, margin=dict(l=0, r=0, t=10, b=0))
         st.plotly_chart(fig, use_container_width=True)
     else:
-        # px.choropleth 自动处理 feature.id 匹配、投影、hover 等
-        colorscale_seq = ["#ffcccc", "#ff6666", "#cc0000", "#660000"] if map_metric == "winter_avg_temp" else None
-        colorscale_name = "RdYlGn" if map_metric != "winter_avg_temp" else None
-
-        if map_metric == "winter_avg_temp":
-            color_scale = colorscale_seq
-        else:
-            color_scale = colorscale_name
-
-        fig = px.choropleth(
+        # scatter_geo：每个省份一个气泡，大小→指标，颜色→指标，不受 Plotly 6 GeoJSON bug 影响
+        color_scale = "RdYlGn" if map_metric != "winter_avg_temp" else "RdBu_r"
+        fig = px.scatter_geo(
             regional_df,
-            geojson=china_geojson,
-            locations="adcode",
-            featureidkey="properties.adcode",  # 明确指定匹配字段
+            lon="lon",
+            lat="lat",
+            size=map_metric,
             color=map_metric,
             color_continuous_scale=color_scale,
             hover_name="province",
-            hover_data={map_metric: ":.1f"},
+            hover_data={map_metric: ":.1f", "gdp_trillion": ":.1f"},
             labels=metric_label_map,
+            size_max=35,
+            projection="natural earth",
+            title=metric_label_map.get(map_metric, map_metric),
         )
-        # 不用 fitbounds（Plotly 6 有兼容问题），手动设中国中心点
         fig.update_geos(
-            visible=False,
+            visible=True,
+            showcountries=True,
+            countrycolor="rgba(0,0,0,0.15)",
+            showcoastlines=True,
+            coastlinecolor="rgba(0,0,0,0.3)",
+            showland=True,
+            landcolor="rgba(240,240,240,0.8)",
+            showocean=True,
+            oceancolor="rgba(230,240,255,0.6)",
             center={"lat": 35, "lon": 105},
             projection_scale=5,
-            showcountries=False, showcoastlines=False,
-            showland=False, showocean=False,
         )
         fig.update_layout(
             height=550,
-            margin=dict(l=0, r=0, t=0, b=0),
-            geo=dict(center={"lat": 35, "lon": 105}, projection_scale=5),
+            margin=dict(l=0, r=0, t=40, b=0),
         )
+        st.caption("💡 气泡大小 & 颜色 = 指标数值")
         st.plotly_chart(fig, use_container_width=True)
 
     # ---- 区域指标对比 ----
