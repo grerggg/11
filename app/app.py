@@ -101,27 +101,48 @@ def load_data() -> pd.DataFrame:
     """
     加载清洗后的新能源车型数据。
 
-    自动尝试多个路径：
-    1. data/ev_data_cleaned.csv (项目根目录)
-    2. ../data/ev_data_cleaned.csv (从 app/ 目录)
+    自动尝试多个路径，兼容各种启动方式。
     """
+    # 构建候选路径列表
     paths = [
         PROJECT_ROOT / "data" / "ev_data_cleaned.csv",
+        Path(__file__).parent.parent / "data" / "ev_data_cleaned.csv",
         Path("data") / "ev_data_cleaned.csv",
         Path("../data") / "ev_data_cleaned.csv",
+        Path.cwd() / "data" / "ev_data_cleaned.csv",
+        Path.cwd() / "EV_Market_Analysis" / "data" / "ev_data_cleaned.csv",
+        Path.home() / "Desktop" / "EV_Market_Analysis" / "data" / "ev_data_cleaned.csv",
     ]
 
+    # 去重并转为绝对路径
+    seen = set()
+    unique_paths = []
     for p in paths:
-        if p.exists():
-            df = pd.read_csv(p)
-            # 确保关键列存在
-            required_cols = ["brand", "model", "price_median", "range_km"]
-            if all(c in df.columns for c in required_cols):
-                return df
+        try:
+            resolved = p.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                unique_paths.append(resolved)
+        except Exception:
+            pass
 
-    # 所有路径都找不到，显示错误
-    st.error("""
+    for p in unique_paths:
+        if p.exists():
+            try:
+                df = pd.read_csv(p)
+                required_cols = ["brand", "price_median", "range_km"]
+                if all(c in df.columns for c in required_cols):
+                    return df
+            except Exception:
+                continue
+
+    # 所有路径都找不到
+    searched = "\n".join(f"  - {p}" for p in unique_paths)
+    st.error(f"""
     ❌ **找不到数据文件 `ev_data_cleaned.csv`**
+
+    已搜索以下路径：
+    {searched}
 
     请先运行以下命令生成模拟数据：
     ```
@@ -135,28 +156,31 @@ def load_data() -> pd.DataFrame:
 @st.cache_data(ttl=3600)
 def load_regional_data() -> pd.DataFrame:
     """加载区域经济数据"""
-    paths = [
-        PROJECT_ROOT / "data" / "regional_data.csv",
-        Path("data") / "regional_data.csv",
-        Path("../data") / "regional_data.csv",
-    ]
-    for p in paths:
-        if p.exists():
-            return pd.read_csv(p)
-    return pd.DataFrame()
+    return _load_csv("regional_data.csv")
 
 
 @st.cache_data(ttl=3600)
 def load_trend_data() -> pd.DataFrame:
     """加载趋势数据"""
+    return _load_csv("trend_data.csv")
+
+
+def _load_csv(filename: str) -> pd.DataFrame:
+    """通用 CSV 加载，自动搜索多个路径"""
     paths = [
-        PROJECT_ROOT / "data" / "trend_data.csv",
-        Path("data") / "trend_data.csv",
-        Path("../data") / "trend_data.csv",
+        PROJECT_ROOT / "data" / filename,
+        Path(__file__).parent.parent / "data" / filename,
+        Path("data") / filename,
+        Path("../data") / filename,
+        Path.cwd() / "data" / filename,
     ]
     for p in paths:
-        if p.exists():
-            return pd.read_csv(p)
+        try:
+            resolved = p.resolve()
+            if resolved.exists():
+                return pd.read_csv(resolved)
+        except Exception:
+            continue
     return pd.DataFrame()
 
 
