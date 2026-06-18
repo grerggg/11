@@ -44,3 +44,4 @@ Desktop.ini
 *.log
 geckodriver.log
 chromedriver.log
+_test_map.html
