@@ -1275,41 +1275,51 @@ def render_regional_analysis(df: pd.DataFrame):
         fig.update_layout(height=500, margin=dict(l=0, r=0, t=10, b=0))
         st.plotly_chart(fig, use_container_width=True)
     else:
-        # scatter_geo：每个省份一个气泡，大小→指标，颜色→指标，不受 Plotly 6 GeoJSON bug 影响
         color_scale = "RdYlGn" if map_metric != "winter_avg_temp" else "RdBu_r"
-        fig = px.scatter_geo(
-            regional_df,
-            lon="lon",
-            lat="lat",
-            size=map_metric,
-            color=map_metric,
-            color_continuous_scale=color_scale,
-            hover_name="province",
-            hover_data={map_metric: ":.1f", "gdp_trillion": ":.1f"},
-            labels=metric_label_map,
-            size_max=35,
-            projection="natural earth",
-            title=metric_label_map.get(map_metric, map_metric),
-        )
-        fig.update_geos(
-            visible=True,
-            showcountries=True,
-            countrycolor="rgba(0,0,0,0.15)",
-            showcoastlines=True,
-            coastlinecolor="rgba(0,0,0,0.3)",
-            showland=True,
-            landcolor="rgba(240,240,240,0.8)",
-            showocean=True,
-            oceancolor="rgba(230,240,255,0.6)",
-            center={"lat": 35, "lon": 105},
-            projection_scale=5,
-        )
-        fig.update_layout(
-            height=550,
-            margin=dict(l=0, r=0, t=40, b=0),
-        )
-        st.caption("💡 气泡大小 & 颜色 = 指标数值")
-        st.plotly_chart(fig, use_container_width=True)
+        title = metric_label_map.get(map_metric, map_metric)
+
+        # 双视图：气泡地图 + 排名柱状图
+        col_map, col_bar = st.columns([3, 2])
+
+        with col_map:
+            fig = px.scatter_geo(
+                regional_df,
+                lon="lon", lat="lat",
+                size=map_metric,
+                color=map_metric,
+                color_continuous_scale=color_scale,
+                hover_name="province",
+                hover_data={map_metric: ":.1f", "gdp_trillion": ":.2f"},
+                labels=metric_label_map,
+                size_max=30,
+                projection="natural earth",
+                title=f"📍 {title} - 地理分布",
+            )
+            fig.update_geos(
+                showcountries=True, countrycolor="rgba(0,0,0,0.12)",
+                showcoastlines=True, coastlinecolor="rgba(0,0,0,0.2)",
+                showland=True, landcolor="rgba(245,245,245,1)",
+                showocean=True, oceancolor="rgba(235,245,255,1)",
+                center={"lat": 36, "lon": 104},
+                projection_scale=4.5,
+            )
+            fig.update_traces(marker=dict(sizemin=5, line=dict(width=0.5, color="white")))
+            fig.update_layout(height=500, margin=dict(l=0, r=0, t=35, b=0), coloraxis_colorbar=dict(len=0.65))
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col_bar:
+            fig = px.bar(
+                regional_df.nlargest(15, map_metric).sort_values(map_metric),
+                x=map_metric, y="province", orientation="h",
+                color=map_metric, color_continuous_scale=color_scale,
+                labels=metric_label_map,
+                title=f"📊 {title} - Top 15",
+                text_auto=".1f",
+            )
+            fig.update_traces(textposition="outside")
+            fig.update_layout(height=500, margin=dict(l=0, r=0, t=35, b=0), coloraxis_showscale=False,
+                              yaxis={"categoryorder": "total ascending"})
+            st.plotly_chart(fig, use_container_width=True)
 
     # ---- 区域指标对比 ----
     st.markdown("---")
