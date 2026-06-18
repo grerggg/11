@@ -93,95 +93,259 @@ st.markdown("""
 
 
 # =============================================================================
-# 数据加载（缓存）
+# 数据加载（缓存 + 自动生成）
+# 优先级：磁盘 CSV > 自动生成模拟数据
+# 适用于本地开发 & Streamlit Cloud 部署
 # =============================================================================
 
-@st.cache_data(ttl=3600)
-def load_data() -> pd.DataFrame:
-    """
-    加载清洗后的新能源车型数据。
 
-    自动尝试多个路径，兼容各种启动方式。
-    """
-    # 构建候选路径列表
-    paths = [
-        PROJECT_ROOT / "data" / "ev_data_cleaned.csv",
-        Path(__file__).parent.parent / "data" / "ev_data_cleaned.csv",
-        Path("data") / "ev_data_cleaned.csv",
-        Path("../data") / "ev_data_cleaned.csv",
-        Path.cwd() / "data" / "ev_data_cleaned.csv",
-        Path.cwd() / "EV_Market_Analysis" / "data" / "ev_data_cleaned.csv",
-        Path.home() / "Desktop" / "EV_Market_Analysis" / "data" / "ev_data_cleaned.csv",
-    ]
-
-    # 去重并转为绝对路径
-    seen = set()
-    unique_paths = []
-    for p in paths:
-        try:
-            resolved = p.resolve()
-            if resolved not in seen:
-                seen.add(resolved)
-                unique_paths.append(resolved)
-        except Exception:
-            pass
-
-    for p in unique_paths:
-        if p.exists():
-            try:
-                df = pd.read_csv(p)
-                required_cols = ["brand", "price_median", "range_km"]
-                if all(c in df.columns for c in required_cols):
-                    return df
-            except Exception:
-                continue
-
-    # 所有路径都找不到
-    searched = "\n".join(f"  - {p}" for p in unique_paths)
-    st.error(f"""
-    ❌ **找不到数据文件 `ev_data_cleaned.csv`**
-
-    已搜索以下路径：
-    {searched}
-
-    请先运行以下命令生成模拟数据：
-    ```
-    cd EV_Market_Analysis
-    python src/generate_sample_data.py
-    ```
-    """)
-    return pd.DataFrame()
-
-
-@st.cache_data(ttl=3600)
-def load_regional_data() -> pd.DataFrame:
-    """加载区域经济数据"""
-    return _load_csv("regional_data.csv")
-
-
-@st.cache_data(ttl=3600)
-def load_trend_data() -> pd.DataFrame:
-    """加载趋势数据"""
-    return _load_csv("trend_data.csv")
-
-
-def _load_csv(filename: str) -> pd.DataFrame:
-    """通用 CSV 加载，自动搜索多个路径"""
-    paths = [
+def _resolve_data_path(filename: str) -> Path | None:
+    """在多个可能位置查找数据文件"""
+    candidates = [
         PROJECT_ROOT / "data" / filename,
         Path(__file__).parent.parent / "data" / filename,
         Path("data") / filename,
         Path("../data") / filename,
         Path.cwd() / "data" / filename,
     ]
-    for p in paths:
+    for p in candidates:
         try:
-            resolved = p.resolve()
-            if resolved.exists():
-                return pd.read_csv(resolved)
+            if p.resolve().exists():
+                return p.resolve()
         except Exception:
             continue
-    return pd.DataFrame()
+    return None
+
+
+# =============================================================================
+# 中国地图 GeoJSON 加载（模块级缓存）
+# =============================================================================
+
+@st.cache_data(ttl=86400)
+def _load_china_geojson():
+    """加载中国省份边界 GeoJSON（阿里云 DataV）"""
+    import urllib.request
+    import json
+    url = "https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json"
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+
+
+# =============================================================================
+# 统一数据入口
+# =============================================================================
+
+
+@st.cache_data(ttl=3600)
+def _get_all_data():
+    """
+    统一数据入口。
+    先尝试磁盘加载 → 找不到则内存生成（兼容云端部署）。
+    结果缓存整个会话周期。
+    """
+    # 1) 尝试磁盘
+    vp = _resolve_data_path("ev_data_cleaned.csv")
+    rp = _resolve_data_path("regional_data.csv")
+    tp = _resolve_data_path("trend_data.csv")
+
+    if vp:
+        return {
+            "vehicles": pd.read_csv(vp),
+            "regional": pd.read_csv(rp) if rp else pd.DataFrame(),
+            "trend": pd.read_csv(tp) if tp else pd.DataFrame(),
+            "auto": False,
+        }
+
+    # 2) 内存自动生成（云端/首次运行）
+    st.toast("🔄 首次运行，正在自动生成模拟数据…", icon="⏳")
+    data = _auto_generate_all()
+    st.toast("✅ 数据生成完毕！", icon="✅")
+    data["auto"] = True
+    return data
+
+
+def load_data() -> pd.DataFrame:
+    """加载清洗后的车型数据"""
+    d = _get_all_data()
+    if d.get("auto"):
+        st.info("💡 已自动生成模拟数据（用于演示），本地使用请运行 `python src/generate_sample_data.py`", icon="ℹ️")
+    return d["vehicles"]
+
+
+def load_regional_data() -> pd.DataFrame:
+    """加载区域经济数据"""
+    return _get_all_data()["regional"]
+
+
+def load_trend_data() -> pd.DataFrame:
+    """加载趋势数据"""
+    return _get_all_data()["trend"]
+
+
+# =============================================================================
+# 内存数据生成器（不依赖 src/，云端可直接运行）
+# =============================================================================
+
+def _auto_generate_all() -> dict:
+    """内存中生成全部模拟数据（车型 + 区域 + 趋势）"""
+    np.random.seed(42)
+
+    # ======== 车型数据 ========
+    BRANDS = [
+        ("比亚迪", 18), ("五菱", 6), ("长安", 15), ("吉利", 16),
+        ("广汽埃安", 17), ("长城欧拉", 14), ("奇瑞", 12), ("红旗", 38),
+        ("蔚来", 45), ("小鹏", 22), ("理想", 33), ("问界", 28),
+        ("小米汽车", 24), ("零跑", 15), ("哪吒", 12), ("岚图", 32),
+        ("极氪", 28), ("深蓝", 18), ("仰望", 85), ("特斯拉", 32),
+        ("大众ID", 20), ("丰田", 19), ("本田", 19), ("宝马", 45),
+        ("奔驰", 50), ("奥迪", 42), ("保时捷", 100), ("沃尔沃", 36),
+    ]
+    BATT = ["磷酸铁锂", "三元锂", "磷酸铁锂/三元锂混合"]
+    ENERGY = ["纯电动", "纯电动", "插电混动", "增程式"]
+    BODY = ["微型车","小型车","紧凑型车","中型车","中大型车","大型车",
+            "小型SUV","紧凑型SUV","中型SUV","中大型SUV","大型SUV","MPV","跑车"]
+    ADAS = ["L0", "L1", "L2", "L2+", "L3"]
+    SIZES = {"微型车":(2900,1550,1520,2000),"小型车":(3700,1700,1520,2450),
+             "紧凑型车":(4500,1800,1470,2680),"中型车":(4850,1850,1460,2850),
+             "中大型车":(5050,1920,1480,3000),"大型车":(5300,1980,1500,3150),
+             "小型SUV":(4200,1780,1620,2580),"紧凑型SUV":(4550,1850,1680,2720),
+             "中型SUV":(4800,1920,1720,2850),"中大型SUV":(5050,1980,1780,2980),
+             "大型SUV":(5250,2030,1850,3120),"MPV":(4900,1920,1780,2980),
+             "跑车":(4600,1950,1250,2750)}
+
+    rows = []
+    for bname, pbase in BRANDS:
+        ns = np.random.randint(2, 13)
+        pstd = pbase * 0.3
+        for s in range(ns):
+            sn = f"{bname}-系{s+1}"
+            sh = np.random.normal(0, pstd * 0.3)
+            nm = np.random.randint(3, 16)
+            for _ in range(nm):
+                gp = max(2.8, pbase + sh + np.random.normal(0, pstd * 0.5))
+                rng = int(np.clip(150 + gp*10 + max(0, gp-10)*3 + np.random.normal(0, 40), 100, 1050))
+                eff = np.random.uniform(5.5, 7.5)
+                cap = round(max(9, min(150, rng/eff + np.random.normal(0, 3))), 1)
+                pk = int(np.clip(30 + gp*5 + np.random.normal(0, 20), 20, 600))
+                tq = int(pk * np.random.uniform(1.8, 3.2))
+                ac = round(np.clip(12 - gp*0.1 + np.random.normal(0, 0.8), 1.8, 14.0), 1)
+
+                if gp < 8: bt = np.random.choice(["微型车","小型车","微型车","小型车","紧凑型车"])
+                elif gp < 15: bt = np.random.choice(["紧凑型车","小型SUV","紧凑型SUV","中型车"])
+                elif gp < 30: bt = np.random.choice(["中型车","紧凑型SUV","中型SUV","中大型车","MPV"])
+                elif gp < 50: bt = np.random.choice(["中大型车","中型SUV","中大型SUV","MPV","跑车"])
+                else: bt = np.random.choice(["大型车","中大型SUV","大型SUV","跑车","MPV"])
+
+                bl, bw, bh, bwb = SIZES.get(bt, SIZES["中型车"])
+                lm = int(bl + np.random.normal(0, 80))
+                wm = int(bw + np.random.normal(0, 40))
+                hm = int(bh + np.random.normal(0, 30))
+                wb = int(bwb + np.random.normal(0, 60))
+
+                if gp < 10: aw = [35,40,20,4,1]
+                elif gp < 20: aw = [5,20,50,20,5]
+                elif gp < 40: aw = [1,5,35,40,19]
+                else: aw = [0,2,15,40,43]
+                ad = np.random.choice(ADAS, p=np.array(aw)/sum(aw))
+
+                us = round(np.clip(3.2 + gp/50*1.5 + np.random.normal(0, 0.4), 2.0, 5.0), 1)
+
+                if bname == "理想": et = "增程式"
+                elif pbase < 8: et = np.random.choice(["纯电动","纯电动","纯电动","纯电动","插电混动"])
+                else: et = np.random.choice(ENERGY)
+
+                sts = np.random.choice([6,7]) if bt=="MPV" else (np.random.choice([2,4]) if bt=="跑车" else 5)
+                mn = f"{sn}-{np.random.randint(100,999)}" + (" EV" if et=="纯电动" else (" PHEV" if et=="插电混动" else " EREV"))
+
+                rows.append({"brand":bname,"series":sn,"model":mn,"guide_price":round(gp,2),
+                    "dealer_price":round(gp*np.random.uniform(0.92,1.0),2),
+                    "range_km":rng,"battery_type":np.random.choice(BATT),"battery_capacity":cap,
+                    "power_kw":pk,"torque_nm":tq,"accel_0_100":ac,"body_type":bt,
+                    "length_mm":lm,"width_mm":wm,"height_mm":hm,"wheelbase_mm":wb,
+                    "adas_level":ad,"user_score":us,"review_count":int(np.random.exponential(200)+np.random.randint(1,500)),
+                    "energy_type":et,"seats":sts})
+
+    dfv = pd.DataFrame(rows)
+    # 缺失值
+    dfv.loc[np.random.random(len(dfv)) < 0.023, "guide_price"] = np.nan
+    dfv.loc[np.random.random(len(dfv)) < 0.011, "range_km"] = np.nan
+    dfv.loc[np.random.random(len(dfv)) < 0.03, "user_score"] = np.nan
+    dfv["price_low"] = dfv["guide_price"]; dfv["price_high"] = dfv["guide_price"]
+    dfv["price_median"] = dfv["guide_price"]
+
+    # 清洗 & 衍生
+    for c in ["range_km","battery_capacity","power_kw","torque_nm","accel_0_100","length_mm","width_mm","height_mm","wheelbase_mm","user_score","seats"]:
+        if c in dfv.columns: dfv[c] = pd.to_numeric(dfv[c], errors="coerce")
+    for c in ["price_median","range_km","battery_capacity","power_kw","user_score"]:
+        if c in dfv.columns:
+            bm = dfv.groupby("brand")[c].transform("median")
+            dfv[c] = dfv[c].fillna(bm).fillna(dfv[c].median())
+    dfv["range_price_ratio"] = np.where(dfv["price_median"] > 0, dfv["range_km"]/dfv["price_median"], 0)
+    gm = dfv["price_median"].median()
+    dfv["brand_premium_index"] = (dfv.groupby("brand")["price_median"].transform("median") - gm) / gm
+    for c in ["power_kw","torque_nm","accel_0_100"]:
+        if c in dfv.columns: dfv[c] = dfv[c].fillna(dfv[c].median())
+    pz = (dfv["power_kw"]-dfv["power_kw"].mean())/dfv["power_kw"].std()
+    tz = (dfv["torque_nm"]-dfv["torque_nm"].mean())/dfv["torque_nm"].std()
+    az = -(dfv["accel_0_100"]-dfv["accel_0_100"].mean())/dfv["accel_0_100"].std()
+    dfv["power_score"] = pz.fillna(0)*0.35 + tz.fillna(0)*0.25 + az.fillna(0)*0.40
+    dfv["space_index"] = 0.0
+    dfv["tech_score"] = dfv["power_score"].fillna(0)*0.5
+    am = {"L0":0,"L1":1,"L2":2,"L2+":2.5,"L3":3}
+    dfv["adas_level_num"] = dfv["adas_level"].map(am).fillna(1)
+    for c in ["brand","battery_type","body_type","energy_type"]:
+        if c in dfv.columns:
+            dfv[c] = dfv[c].fillna("未知").astype(str)
+            dfv[f"{c}_encoded"] = pd.factorize(dfv[c])[0]
+    dfv["price_category"] = pd.cut(dfv["price_median"],
+        [0,10,20,35,60,float("inf")],
+        labels=["经济型(<10万)","入门型(10-20万)","中端型(20-35万)","高端型(35-60万)","豪华型(>60万)"],
+        right=True)
+
+    # ======== 区域数据 ========
+    np.random.seed(123)
+    # 使用 DataV GeoJSON 匹配的完整省份名
+    PROVS = ["北京市","天津市","河北省","山西省","内蒙古自治区","辽宁省","吉林省","黑龙江省",
+             "上海市","江苏省","浙江省","安徽省","福建省","江西省","山东省","河南省",
+             "湖北省","湖南省","广东省","广西壮族自治区","海南省","重庆市",
+             "四川省","贵州省","云南省","西藏自治区","陕西省","甘肃省","青海省",
+             "宁夏回族自治区","新疆维吾尔自治区"]
+    rrows = []
+    for pv in PROVS:
+        if pv in ["上海市","北京市","天津市","浙江省","江苏省","广东省","福建省"]:
+            gdp, inc, chg, sal, wt = np.random.uniform(4,14), np.random.uniform(5,9), np.random.uniform(30,80), np.random.uniform(15,45), np.random.uniform(2,10)
+        elif pv in ["湖北省","湖南省","河南省","安徽省","江西省","山西省","陕西省","四川省","重庆市"]:
+            gdp, inc, chg, sal, wt = np.random.uniform(2,6), np.random.uniform(3,5.5), np.random.uniform(8,25), np.random.uniform(3,18), np.random.uniform(-2,8)
+        elif pv in ["辽宁省","吉林省","黑龙江省"]:
+            gdp, inc, chg, sal, wt = np.random.uniform(1,3), np.random.uniform(2.5,4.5), np.random.uniform(3,12), np.random.uniform(0.5,5), np.random.uniform(-20,-5)
+        else:
+            gdp, inc, chg, sal, wt = np.random.uniform(0.3,3), np.random.uniform(2,4.5), np.random.uniform(1,12), np.random.uniform(0.1,5), np.random.uniform(-10,5)
+        rrows.append({"province":pv,"gdp_trillion":round(gdp,2),"gdp_per_capita":round(inc*1.4,1),
+            "urban_income":round(inc,1),"charger_count_per_10k":round(chg,1),
+            "ev_annual_sales_10k":round(sal,1),"winter_avg_temp":round(wt,1),
+            "is_plate_restricted":int(pv in ["北京市","上海市","天津市"])})
+    dfr = pd.DataFrame(rrows)
+
+    # ======== 趋势数据 ========
+    dft = pd.DataFrame([
+        {"year":y,"avg_range_km":r,"range_std_km":s,"market_penetration_pct":p}
+        for y,r,s,p in zip([2020,2021,2022,2023,2024,2025],
+            [408,435,475,520,560,592],[89,105,125,148,165,178],
+            [5.8,13.4,25.6,31.6,40.2,48.5])])
+
+    # 尝试写盘（本地开发环境可用）
+    try:
+        (PROJECT_ROOT / "data").mkdir(parents=True, exist_ok=True)
+        dfv.to_csv(PROJECT_ROOT / "data" / "ev_data_cleaned.csv", index=False, encoding="utf-8-sig")
+        dfr.to_csv(PROJECT_ROOT / "data" / "regional_data.csv", index=False, encoding="utf-8-sig")
+        dft.to_csv(PROJECT_ROOT / "data" / "trend_data.csv", index=False, encoding="utf-8-sig")
+    except Exception:
+        pass
+
+    return {"vehicles": dfv, "regional": dfr, "trend": dft}
 
 
 @st.cache_resource
@@ -1035,7 +1199,6 @@ def render_regional_analysis(df: pd.DataFrame):
         }.get(x, x),
     )
 
-    # 使用 Plotly Choropleth
     metric_label_map = {
         "ev_annual_sales_10k": "新能源车年销量 (万辆)",
         "charger_count_per_10k": "充电桩密度 (公共桩/万人)",
@@ -1044,39 +1207,46 @@ def render_regional_analysis(df: pd.DataFrame):
         "winter_avg_temp": "冬季平均温度 (°C)",
     }
 
-    fig = px.choropleth(
-        regional_df,
-        locations="province",
-        locationmode="country names",
-        color=map_metric,
-        hover_name="province",
-        hover_data={
-            "ev_annual_sales_10k": ":.1f",
-            "charger_count_per_10k": ":.1f",
-            "urban_income": ":.1f",
-            "winter_avg_temp": ":.1f",
-        },
-        color_continuous_scale="RdYlGn" if map_metric != "winter_avg_temp" else "RdBu_r",
-        labels=metric_label_map,
-        # 中国地图投影
-        scope="asia",
-    )
-    fig.update_geos(
-        visible=False,
-        lonaxis_range=[73, 135],
-        lataxis_range=[15, 55],
-        showcountries=True,
-        countrycolor="rgba(0,0,0,0.2)",
-    )
-    fig.update_layout(
-        height=500,
-        margin=dict(l=0, r=0, t=0, b=0),
-        geo=dict(
-            center={"lat": 35, "lon": 105},
-            projection_scale=4,
-        ),
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    china_geojson = _load_china_geojson()
+
+    if china_geojson is None:
+        st.warning("⚠️ 无法加载中国地图数据，改用柱状图展示")
+        fig = px.bar(
+            regional_df.nlargest(15, map_metric),
+            x="province", y=map_metric,
+            color=map_metric,
+            color_continuous_scale="RdYlGn" if map_metric != "winter_avg_temp" else "RdBu_r",
+            labels=metric_label_map,
+        )
+        fig.update_layout(height=500, margin=dict(l=0, r=0, t=10, b=0))
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        fig = px.choropleth(
+            regional_df,
+            geojson=china_geojson,
+            locations="province",
+            featureidkey="properties.name",
+            color=map_metric,
+            hover_name="province",
+            hover_data={
+                "ev_annual_sales_10k": ":.1f",
+                "charger_count_per_10k": ":.1f",
+                "urban_income": ":.1f",
+                "winter_avg_temp": ":.1f",
+            },
+            color_continuous_scale="RdYlGn" if map_metric != "winter_avg_temp" else "RdBu_r",
+            labels=metric_label_map,
+            title=metric_label_map.get(map_metric, map_metric),
+        )
+        fig.update_geos(
+            visible=False,
+            fitbounds="geojson",
+        )
+        fig.update_layout(
+            height=550,
+            margin=dict(l=0, r=0, t=40, b=0),
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
     # ---- 区域指标对比 ----
     st.markdown("---")

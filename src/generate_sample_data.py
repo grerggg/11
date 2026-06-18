@@ -88,10 +88,14 @@ ENERGY_TYPES = ["纯电动", "插电混动", "增程式"]
 
 # 各省市数据
 PROVINCES = [
-    "北京", "天津", "河北", "山西", "内蒙古", "辽宁", "吉林", "黑龙江",
-    "上海", "江苏", "浙江", "安徽", "福建", "江西", "山东", "河南",
-    "湖北", "湖南", "广东", "广西", "海南", "重庆", "四川", "贵州",
-    "云南", "西藏", "陕西", "甘肃", "青海", "宁夏", "新疆",
+    "北京市", "天津市", "河北省", "山西省", "内蒙古自治区",
+    "辽宁省", "吉林省", "黑龙江省",
+    "上海市", "江苏省", "浙江省", "安徽省", "福建省", "江西省",
+    "山东省", "河南省",
+    "湖北省", "湖南省", "广东省", "广西壮族自治区", "海南省",
+    "重庆市", "四川省", "贵州省",
+    "云南省", "西藏自治区", "陕西省", "甘肃省", "青海省",
+    "宁夏回族自治区", "新疆维吾尔自治区",
 ]
 
 # 智能驾驶等级
@@ -312,21 +316,21 @@ def generate_regional_data() -> pd.DataFrame:
     records = []
     for province in PROVINCES:
         # 东部沿海经济较发达
-        if province in ["上海", "北京", "天津", "浙江", "江苏", "广东", "福建"]:
+        if province in ["上海市", "北京市", "天津市", "浙江省", "江苏省", "广东省", "福建省"]:
             gdp_scale = np.random.uniform(4, 14)  # 万亿
             income_scale = np.random.uniform(5, 9)  # 万元
             charger_density = np.random.uniform(30, 80)  # 公共桩/万人
             ev_sales_scale = np.random.uniform(15, 45)  # 万辆
             policy_level = np.random.choice([2, 3, 3, 3])  # 限牌城市政策力度高
         # 中部
-        elif province in ["湖北", "湖南", "河南", "安徽", "江西", "山西", "陕西", "四川", "重庆"]:
+        elif province in ["湖北省", "湖南省", "河南省", "安徽省", "江西省", "山西省", "陕西省", "四川省", "重庆市"]:
             gdp_scale = np.random.uniform(2, 6)
             income_scale = np.random.uniform(3, 5.5)
             charger_density = np.random.uniform(8, 25)
             ev_sales_scale = np.random.uniform(3, 18)
             policy_level = np.random.choice([1, 2, 2])
         # 东北
-        elif province in ["辽宁", "吉林", "黑龙江"]:
+        elif province in ["辽宁省", "吉林省", "黑龙江省"]:
             gdp_scale = np.random.uniform(1, 3)
             income_scale = np.random.uniform(2.5, 4.5)
             charger_density = np.random.uniform(3, 12)
@@ -341,17 +345,17 @@ def generate_regional_data() -> pd.DataFrame:
             policy_level = np.random.choice([0, 1, 1, 2])
 
         # 冬季平均温度（影响纯电接受度）
-        if province in ["黑龙江", "吉林", "辽宁", "内蒙古", "新疆", "青海", "西藏"]:
+        if province in ["黑龙江省", "吉林省", "辽宁省", "内蒙古自治区", "新疆维吾尔自治区", "青海省", "西藏自治区"]:
             winter_temp = np.random.uniform(-25, -5)
-        elif province in ["北京", "天津", "河北", "山西", "宁夏", "甘肃", "陕西"]:
+        elif province in ["北京市", "天津市", "河北省", "山西省", "宁夏回族自治区", "甘肃省", "陕西省"]:
             winter_temp = np.random.uniform(-8, 2)
-        elif province in ["山东", "河南", "江苏", "安徽", "湖北"]:
+        elif province in ["山东省", "河南省", "江苏省", "安徽省", "湖北省"]:
             winter_temp = np.random.uniform(-2, 8)
         else:
             winter_temp = np.random.uniform(5, 22)
 
         # 限牌城市标记
-        is_plate_restricted = province in ["北京", "上海", "广州", "深圳", "天津", "杭州"]
+        is_plate_restricted = province in ["北京市", "上海市", "天津市", "广东省", "浙江省"]
 
         records.append({
             "province": province,
