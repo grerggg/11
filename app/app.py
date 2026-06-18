@@ -1221,12 +1221,22 @@ def render_regional_analysis(df: pd.DataFrame):
     }
 
     china_geojson = _load_china_geojson()
-    # 调试：检查匹配情况
-    if china_geojson:
-        geo_names = {f['properties']['name'] for f in china_geojson['features']}
-        data_names = set(regional_df['province'].tolist())
-        matched = data_names & geo_names
-        st.caption(f'🔍 省份匹配: {len(matched)}/{len(data_names)} | GeoJSON: {china_geojson is not None}')
+
+    # 省份名 → adcode 映射（数字匹配，避开 Unicode 兼容问题）
+    PROVINCE_ADCODE = {
+        "北京市": 110000, "天津市": 120000, "河北省": 130000,
+        "山西省": 140000, "内蒙古自治区": 150000,
+        "辽宁省": 210000, "吉林省": 220000, "黑龙江省": 230000,
+        "上海市": 310000, "江苏省": 320000, "浙江省": 330000,
+        "安徽省": 340000, "福建省": 350000, "江西省": 360000,
+        "山东省": 370000, "河南省": 410000, "湖北省": 420000,
+        "湖南省": 430000, "广东省": 440000, "广西壮族自治区": 450000,
+        "海南省": 460000, "重庆市": 500000, "四川省": 510000,
+        "贵州省": 520000, "云南省": 530000, "西藏自治区": 540000,
+        "陕西省": 610000, "甘肃省": 620000, "青海省": 630000,
+        "宁夏回族自治区": 640000, "新疆维吾尔自治区": 650000,
+    }
+    regional_df["adcode"] = regional_df["province"].map(PROVINCE_ADCODE)
 
     if china_geojson is None:
         st.warning("⚠️ 无法加载中国地图数据，改用柱状图展示")
@@ -1240,18 +1250,18 @@ def render_regional_analysis(df: pd.DataFrame):
         fig.update_layout(height=500, margin=dict(l=0, r=0, t=10, b=0))
         st.plotly_chart(fig, use_container_width=True)
     else:
-        # 使用 go.Choropleth（兼容 Plotly 5 & 6）
+        # 使用 go.Choropleth，用数字 adcode 匹配（避免 Unicode 问题）
         colorscale = "RdYlGn" if map_metric != "winter_avg_temp" else "RdBu_r"
         fig = go.Figure(go.Choropleth(
             geojson=china_geojson,
-            locations=regional_df["province"],
+            locations=regional_df["adcode"],
             z=regional_df[map_metric],
-            featureidkey="properties.name",
+            featureidkey="properties.adcode",
             colorscale=colorscale,
             colorbar_title=metric_label_map.get(map_metric, map_metric),
             marker_line_width=0.5,
             marker_line_color="#ffffff",
-            hovertemplate="%{location}<br>"
+            hovertemplate=regional_df["province"].astype(str) + "<br>"
                            + metric_label_map.get(map_metric, map_metric)
                            + ": %{z:.1f}<extra></extra>",
         ))
