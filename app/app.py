@@ -1238,6 +1238,11 @@ def render_regional_analysis(df: pd.DataFrame):
     }
     regional_df["adcode"] = regional_df["province"].map(PROVINCE_ADCODE)
 
+    # 给 GeoJSON 每个 feature 添加 id 字段（Plotly 默认匹配 feature.id）
+    if china_geojson:
+        for feat in china_geojson["features"]:
+            feat["id"] = str(feat["properties"]["adcode"])
+
     if china_geojson is None:
         st.warning("⚠️ 无法加载中国地图数据，改用柱状图展示")
         fig = px.bar(
@@ -1250,24 +1255,29 @@ def render_regional_analysis(df: pd.DataFrame):
         fig.update_layout(height=500, margin=dict(l=0, r=0, t=10, b=0))
         st.plotly_chart(fig, use_container_width=True)
     else:
-        # 使用 go.Choropleth，用数字 adcode 匹配（避免 Unicode 问题）
-        colorscale = "RdYlGn" if map_metric != "winter_avg_temp" else "RdBu_r"
-        fig = go.Figure(go.Choropleth(
+        # px.choropleth 自动处理 feature.id 匹配、投影、hover 等
+        colorscale_seq = ["#ffcccc", "#ff6666", "#cc0000", "#660000"] if map_metric == "winter_avg_temp" else None
+        colorscale_name = "RdYlGn" if map_metric != "winter_avg_temp" else None
+
+        if map_metric == "winter_avg_temp":
+            color_scale = colorscale_seq
+        else:
+            color_scale = colorscale_name
+
+        fig = px.choropleth(
+            regional_df,
             geojson=china_geojson,
-            locations=regional_df["adcode"],
-            z=regional_df[map_metric],
-            featureidkey="properties.adcode",
-            colorscale=colorscale,
-            colorbar_title=metric_label_map.get(map_metric, map_metric),
-            marker_line_width=0.5,
-            marker_line_color="#ffffff",
-            hovertemplate=regional_df["province"].astype(str) + "<br>"
-                           + metric_label_map.get(map_metric, map_metric)
-                           + ": %{z:.1f}<extra></extra>",
-        ))
+            locations="adcode",
+            featureidkey="properties.adcode",  # 明确指定匹配字段
+            color=map_metric,
+            color_continuous_scale=color_scale,
+            hover_name="province",
+            hover_data={map_metric: ":.1f"},
+            labels=metric_label_map,
+        )
+        # 不用 fitbounds（Plotly 6 有兼容问题），手动设中国中心点
         fig.update_geos(
             visible=False,
-            projection_type="equirectangular",
             center={"lat": 35, "lon": 105},
             projection_scale=5,
             showcountries=False, showcoastlines=False,
