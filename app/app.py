@@ -1208,6 +1208,12 @@ def render_regional_analysis(df: pd.DataFrame):
     }
 
     china_geojson = _load_china_geojson()
+    # 调试：检查匹配情况
+    if china_geojson:
+        geo_names = {f['properties']['name'] for f in china_geojson['features']}
+        data_names = set(regional_df['province'].tolist())
+        matched = data_names & geo_names
+        st.caption(f'🔍 省份匹配: {len(matched)}/{len(data_names)} | GeoJSON: {china_geojson is not None}')
 
     if china_geojson is None:
         st.warning("⚠️ 无法加载中国地图数据，改用柱状图展示")
@@ -1236,15 +1242,23 @@ def render_regional_analysis(df: pd.DataFrame):
             },
             color_continuous_scale="RdYlGn" if map_metric != "winter_avg_temp" else "RdBu_r",
             labels=metric_label_map,
-            title=metric_label_map.get(map_metric, map_metric),
         )
         fig.update_geos(
             visible=False,
-            fitbounds="geojson",
+            projection_type="equirectangular",
+            center={"lat": 35, "lon": 105},
+            projection_scale=5,
+            showcountries=False,
+            showcoastlines=False,
+            showland=False,
+            showocean=False,
+            showlakes=False,
+            showrivers=False,
         )
         fig.update_layout(
             height=550,
-            margin=dict(l=0, r=0, t=40, b=0),
+            margin=dict(l=0, r=0, t=0, b=0),
+            geo=dict(center={"lat": 35, "lon": 105}, projection_scale=5),
         )
         st.plotly_chart(fig, use_container_width=True)
 
